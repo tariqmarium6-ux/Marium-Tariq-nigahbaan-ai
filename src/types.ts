@@ -27,6 +27,9 @@ export interface AnalysisResult {
     inputType?: string;
     timestamp?: string;
     uncertainty?: string;
+    apiKeyConfigured?: boolean;
+    isLiveAI?: boolean;
+    fallbackReason?: string;
   };
 }
 

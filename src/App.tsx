@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Header } from "./components/Header";
 import { HomeView } from "./components/HomeView";
 import { InputSection } from "./components/InputSection";
@@ -22,6 +22,33 @@ export default function App() {
   const [initialInputTab, setInitialInputTab] = useState<"image" | "voice" | "url">("image");
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [activeDemoLevel, setActiveDemoLevel] = useState<RiskLevel | null>(null);
+
+  // Health and API key detection
+  const [apiHealth, setApiHealth] = useState<{ checked: boolean; hasApiKey: boolean; message?: string }>({
+    checked: false,
+    hasApiKey: true,
+  });
+
+  // Check health and GEMINI_API_KEY status on mount
+  useEffect(() => {
+    fetch("/api/health")
+      .then((res) => res.json())
+      .then((data) => {
+        setApiHealth({
+          checked: true,
+          hasApiKey: data.hasApiKey ?? false,
+          message: data.message,
+        });
+      })
+      .catch((err) => {
+        console.warn("Could not reach /api/health:", err);
+        setApiHealth({
+          checked: true,
+          hasApiKey: false,
+          message: "API server unreachable. Verify Vercel deployment.",
+        });
+      });
+  }, []);
 
   // Modal states
   const [isTrustedContactOpen, setIsTrustedContactOpen] = useState<boolean>(false);
@@ -91,15 +118,17 @@ export default function App() {
       });
 
       if (!response.ok) {
-        throw new Error("Analysis failed");
+        const errData = await response.json().catch(() => null);
+        throw new Error(errData?.message || `API error (${response.status})`);
       }
 
       const data: AnalysisResult = await response.json();
       setAnalysisResult(data);
       setCurrentView("verdict");
       audioController.playRiskChime(data.risk_level);
-    } catch (err) {
+    } catch (err: any) {
       console.warn("API request encountered error, using resilient fallback:", err);
+      const isMissingKey = !apiHealth.hasApiKey;
       // Fallback: If network issue or server error, provide emergency safety analysis
       const fallbackResult: AnalysisResult = {
         risk_level: "caution",
@@ -107,14 +136,16 @@ export default function App() {
         language,
         summary: isUrdu
           ? "ہم فی الحال مکمل جانچ نہیں کر سکے۔ براہ کرم اپنے کسی بااعتماد فرد سے مشورہ لیں۔"
-          : "Could not fully verify right now. Please ask someone you trust before taking any action.",
+          : isMissingKey
+          ? "Notice: GEMINI_API_KEY is not configured on Vercel. Please add GEMINI_API_KEY to your Vercel Project Settings."
+          : "Could not reach analysis server. Please check your network and verify with someone you trust.",
         signals: [
           {
             type: "unusual_request",
-            label: isUrdu ? "غیر یقینی صورتحال" : "Uncertainty",
+            label: isUrdu ? "سرور کا رابطہ نہیں ہو سکا" : "Analysis Service Offline",
             explanation: isUrdu
-              ? "کسی بھی غیر متوقع میسج پر پیسے بھیجنے سے گریز کریں۔"
-              : "Avoid sending money on unexpected or unverified messages.",
+              ? "میسج کا معائنہ کرنے کے لیے لائیو سرور تک رسائی حاصل نہیں ہو سکی۔ احتیاط برتیں۔"
+              : `Serverless error: ${err?.message || "Endpoint unreachable"}. Make sure GEMINI_API_KEY is set in Vercel.`,
           },
         ],
         recommended_actions: [
@@ -125,6 +156,11 @@ export default function App() {
           ? "اس وقت ہم مکمل جانچ نہیں کر سکے۔ کسی بھی صورت میں پیسے نہ بھیجیں اور پہلے اپنے کسی بااعتماد فرد سے پوچھیں۔"
           : "We could not fully check this right now. Do not send any money and consult someone you trust first.",
         uncertainty: "high",
+        technical_details: {
+          modelUsed: "Offline Safety Engine (Vercel Serverless / Key Check)",
+          apiKeyConfigured: false,
+          isLiveAI: false,
+        },
       };
 
       setAnalysisResult(fallbackResult);
@@ -171,6 +207,18 @@ export default function App() {
         activeDemoLevel={activeDemoLevel}
         onResetToHome={handleResetToHome}
       />
+
+      {/* Vercel Environment Configuration Notice if GEMINI_API_KEY is missing */}
+      {apiHealth.checked && !apiHealth.hasApiKey && (
+        <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 text-center text-xs font-semibold text-amber-900 flex items-center justify-center gap-2">
+          <span>⚠️</span>
+          <span>
+            {isUrdu
+              ? "ورسیل (Vercel) پر لائیو AI کے لیے GEMINI_API_KEY شامل کریں۔ فی الحال خودکار حفاظتی قوانین فعال ہیں۔"
+              : "GEMINI_API_KEY is missing in Vercel Environment Variables. Add it to Project Settings to activate live Gemini AI."}
+          </span>
+        </div>
+      )}
 
       {/* Main Responsive Canvas (Optimized for both Mobile & Laptop/Desktop presentation) */}
       <main className="flex-1 w-full max-w-md sm:max-w-xl md:max-w-2xl lg:max-w-3xl xl:max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 flex flex-col justify-start">
